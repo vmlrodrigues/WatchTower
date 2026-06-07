@@ -5,7 +5,7 @@
 //     - ESP32Async / ESP Async WebServer ~3.9.0
 //     - ESP32Async / Async TCP ~3.4.9
 //     - WiFiManager ~2.0.17
-//     - ArduinoMDNS ~1.0.0
+//     - ESPmDNS (built into ESP32 Arduino core, no separate install needed)
 // - set the PIN_ANTENNA to desired output pin
 // - set the timezone as desired
 // - build and run the code on your device
@@ -24,24 +24,26 @@
 #include <Adafruit_NeoPixel.h>
 #include <SPI.h>
 #include <ESPUI.h>
-#include <WiFiUdp.h>
-#include <ArduinoMDNS.h>
+#include <ESPmDNS.h>
 #include <time.h>
 #include <esp_sntp.h>
 #include "customJS.h"
+
+bool wwvbLogicSignal(int hour, int minute, int second, int millis, int yday, int year, int today_start_isdst, int tomorrow_start_isdst);
 
 // Flip to false to disable the built-in web ui.
 // You might want to do this to avoid leaving unnecessary open ports on your network.
 const bool ENABLE_WEB_UI = true;
 
 // Set this to the pin your antenna is connected on
-const int PIN_ANTENNA = 13;
+const int PIN_ANTENNA = 4;
 
 // Set to your timezone.
 // This is needed for computing DST if applicable
 // https://gist.github.com/alwynallan/24d96091655391107939
-const char *timezone = "PST8PDT,M3.2.0,M11.1.0"; // America/Los_Angeles
-
+//const char *timezone = "PST8PDT,M3.2.0,M11.1.0"; // America/Los_Angeles
+//const char* TZ_INFO = "AEST-10AEDT,M10.1.0,M4.1.0/3";
+const char* TZ_INFO = "AEST-16AEDT-17,M10.1.0,M4.1.0/3";
 
 enum WWVB_T {
   ZERO = 0,
@@ -66,8 +68,6 @@ const uint32_t COLOR_ERROR = pixel ? pixel->Color(150, 0, 0) : 0; // red https:/
 const uint32_t COLOR_TRANSMIT = pixel ? pixel->Color(32, 0, 0) : 0; // dim red https://share.google/wYFYM3t1kDeOJfr1U
 
 WiFiManager wifiManager;
-WiFiUDP udp;
-MDNS mdns(udp);
 bool logicValue = 0; // TODO rename
 struct timeval lastSync;
 WWVB_T broadcast[60];
@@ -142,7 +142,7 @@ void setup() {
   ui_broadcast = ESPUI.label("Broadcast Waveform", ControlColor::Sunflower, "");
   ui_time = ESPUI.label("Current Time", ControlColor::Turquoise, "Loading...");
   ui_date = ESPUI.label("Date", ControlColor::Emerald, "Loading...");
-  ui_timezone = ESPUI.label("Timezone", ControlColor::Peterriver, timezone);
+  ui_timezone = ESPUI.label("Timezone", ControlColor::Peterriver, TZ_INFO);
   ui_uptime = ESPUI.label("System Uptime", ControlColor::Carrot, "0s");
   ui_last_sync = ESPUI.label("Last NTP Sync", ControlColor::Alizarin, "Pending...");
 
@@ -152,7 +152,7 @@ void setup() {
 
   // You may disable the internal webserver by commenting out this line
   if( ENABLE_WEB_UI ) {
-    mdns.begin(WiFi.localIP(), "watchtower");
+    MDNS.begin("watchtower");
     Serial.println("Connect to http://watchtower.local for the console");
     ESPUI.begin("WatchTower");
   }
@@ -162,8 +162,8 @@ void setup() {
   // Connect to network time server
   // By default, it will resync every few hours
   sntp_set_time_sync_notification_cb(time_sync_notification_cb);
-  configTzTime(timezone, ntpServer);
-  
+  configTzTime(TZ_INFO, ntpServer);
+
   struct tm timeinfo;
   if(!getLocalTime(&timeinfo)){
     Serial.println("Failed to obtain time");
@@ -190,8 +190,6 @@ void setup() {
 }
 
 void loop() {
-  mdns.run();
-
   struct timeval now; // current time in seconds / millis
   struct tm buf_now_utc; // current time in UTC
   struct tm buf_now_local; // current time in localtime
@@ -217,12 +215,12 @@ void loop() {
   const bool prevLogicValue = logicValue;
 
   logicValue = wwvbLogicSignal(
-    buf_now_utc.tm_hour,
-    buf_now_utc.tm_min,
-    buf_now_utc.tm_sec, 
+    buf_now_local.tm_hour,
+    buf_now_local.tm_min,
+    buf_now_local.tm_sec,
     now.tv_usec/1000,
-    buf_now_utc.tm_yday+1,
-    buf_now_utc.tm_year+1900,
+    buf_now_local.tm_yday+1,
+    buf_now_local.tm_year+1900,
     buf_today_start.tm_isdst,
     buf_tomorrow_start.tm_isdst
     );
