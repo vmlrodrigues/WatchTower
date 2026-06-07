@@ -142,7 +142,7 @@ void setup() {
   ui_broadcast = ESPUI.label("Broadcast Waveform", ControlColor::Sunflower, "");
   ui_time = ESPUI.label("Current Time", ControlColor::Turquoise, "Loading...");
   ui_date = ESPUI.label("Date", ControlColor::Emerald, "Loading...");
-  ui_timezone = ESPUI.label("Timezone", ControlColor::Peterriver, TZ_INFO);
+  ui_timezone = ESPUI.label("Timezone", ControlColor::Peterriver, "Australia/Sydney");
   ui_uptime = ESPUI.label("System Uptime", ControlColor::Carrot, "0s");
   ui_last_sync = ESPUI.label("Last NTP Sync", ControlColor::Alizarin, "Pending...");
 
@@ -212,6 +212,14 @@ void loop() {
   tomorrow_start.tv_sec = ((tomorrow_start.tv_sec / 86400) + 1) * 86400; // again, close enough
   localtime_r(&tomorrow_start.tv_sec, &buf_tomorrow_start);
 
+  // Real Sydney display time — separate from the fake UTC+16/+17 offset used for WWVB.
+  // buf_now_local holds the fake offset time; this holds the real AEST/AEDT time for display.
+  const int sydney_offset = buf_today_start.tm_isdst ? 11 : 10;
+  time_t sydney_sec = now.tv_sec + sydney_offset * 3600;
+  struct tm buf_now_sydney;
+  gmtime_r(&sydney_sec, &buf_now_sydney);
+  const char* sydney_tz_name = buf_today_start.tm_isdst ? "AEDT" : "AEST";
+
   const bool prevLogicValue = logicValue;
 
   logicValue = wwvbLogicSignal(
@@ -243,13 +251,14 @@ void loop() {
     char timeStringBuff[100]; // Buffer to hold the formatted time string
     char timeStringBuff2[100];
     char timeStringBuff3[20];
-    strftime(timeStringBuff, sizeof(timeStringBuff), "%A, %B %d %Y %H:%M:%S", &buf_now_local); // time
-    strftime(timeStringBuff3, sizeof(timeStringBuff3), "%z %Z", &buf_now_local); // timezone
+    strftime(timeStringBuff, sizeof(timeStringBuff), "%A, %B %d %Y %H:%M:%S", &buf_now_sydney); // time
+    snprintf(timeStringBuff3, sizeof(timeStringBuff3), "+%02d00 %s", sydney_offset, sydney_tz_name); // timezone
     sprintf(timeStringBuff2,"%s.%03d%s", timeStringBuff, now.tv_usec/1000, timeStringBuff3 ); // time+millis+tz
 
     char lastSyncStringBuff[100]; // Buffer to hold the formatted time string
     struct tm buf_lastSync;
-    localtime_r(&lastSync.tv_sec, &buf_lastSync);
+    time_t sydney_last_sync_sec = lastSync.tv_sec + sydney_offset * 3600;
+    gmtime_r(&sydney_last_sync_sec, &buf_lastSync);
     strftime(lastSyncStringBuff, sizeof(lastSyncStringBuff), "%b %d %H:%M", &buf_lastSync);
     Serial.printf("%s [last sync %s]: %s\n",timeStringBuff2, lastSyncStringBuff, logicValue ? "1" : "0");
 
@@ -259,14 +268,20 @@ void loop() {
 
         // --- UPDATE THE WEB UI ---
 
-        // Time
+        // Time (real Sydney time, not the fake WWVB offset time)
         char buf[62];
-        strftime(buf, sizeof(buf), "%H:%M:%S%z %Z", &buf_now_local);
+        char timebuf[12];
+        strftime(timebuf, sizeof(timebuf), "%H:%M:%S", &buf_now_sydney);
+        snprintf(buf, sizeof(buf), "%s +%02d00 %s", timebuf, sydney_offset, sydney_tz_name);
         ESPUI.print(ui_time, buf);
 
         // Date
-        strftime(buf, sizeof(buf), "%A, %B %d %Y", &buf_now_local);
+        strftime(buf, sizeof(buf), "%A, %B %d %Y", &buf_now_sydney);
         ESPUI.print(ui_date, buf);
+
+        // Timezone
+        snprintf(buf, sizeof(buf), "Australia/Sydney (%s UTC+%d)", sydney_tz_name, sydney_offset);
+        ESPUI.print(ui_timezone, buf);
 
         // Broadcast window
         for( int i=0; i<60; ++i ) { // TODO leap seconds
